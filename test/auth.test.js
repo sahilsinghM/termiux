@@ -15,8 +15,6 @@ describe('auth middleware', () => {
 
   it('GET / without a session redirects to /login', async () => {
     const res = await request(app).get('/');
-    // In dev mode, no static files served, but the auth middleware still applies
-    // We verify the redirect happens for the /login GET
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/login');
   });

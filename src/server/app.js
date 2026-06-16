@@ -14,19 +14,20 @@ function createApp() {
     res.json({ status: 'ok', tmux: isTmuxAvailable() });
   });
 
-  // Serve built frontend in production; in dev, Vite handles it
-  if (process.env.NODE_ENV !== 'development') {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', requireAuth, (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  } else {
-    // In dev mode, protect the root so the auth test can verify the redirect
-    app.get('/', requireAuth, (req, res) => {
-      res.send('OK');
-    });
-  }
+  const distPath = path.join(process.cwd(), 'dist');
+
+  // Protect the app shell before static middleware can short-circuit auth
+  app.get('/', requireAuth, (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+
+  // Static assets (JS, CSS, icons) — no auth needed on asset files
+  app.use(express.static(distPath));
+
+  // SPA catch-all for any future client-side routes
+  app.get('*', requireAuth, (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
 
   // Attach sessionParser so the WS upgrade handler can access it
   app.sessionParser = sessionParser;
