@@ -16,16 +16,12 @@ function createApp() {
 
   const distPath = path.join(process.cwd(), 'dist');
 
-  // Protect the app shell before static middleware can short-circuit auth
-  app.get('/', requireAuth, (_req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
+  // Auth gate for everything below — /login and /healthz are already handled above
+  app.use(requireAuth);
 
-  // Static assets (JS, CSS, icons) — no auth needed on asset files
+  // Static assets and SPA shell, only reachable after authentication
   app.use(express.static(distPath));
-
-  // SPA catch-all for any future client-side routes
-  app.get('*', requireAuth, (_req, res) => {
+  app.get('*', (_req, res) => {
     res.sendFile(path.join(distPath, 'index.html'));
   });
 
