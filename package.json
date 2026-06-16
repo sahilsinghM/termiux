@@ -1,0 +1,33 @@
+{
+  "name": "termiux",
+  "version": "0.1.0",
+  "description": "Self-hosted PWA terminal for accessing your Linux machine from your phone",
+  "scripts": {
+    "dev": "concurrently \"nodemon server.js\" \"vite\"",
+    "build": "vite build",
+    "start": "node server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "session-file-store": "^1.5.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.4.0",
+    "express-session": "^1.18.1",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2",
+    "@vitejs/plugin-react": "^4.3.3",
+    "concurrently": "^9.1.0",
+    "nodemon": "^3.1.7",
+    "supertest": "^7.0.0",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.6"
+  }
+}
