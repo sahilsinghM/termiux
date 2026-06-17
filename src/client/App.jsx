@@ -12,10 +12,38 @@ export function App() {
   const disconnected = !status.connected;
   const overlayVisible = disconnected && !status.ended;
 
+  function logout() {
+    fetch('/logout', { method: 'POST' }).then(() => {
+      // /cdn-cgi/access/logout clears the CF Access JWT, then redirects to the CF login page
+      location.href = '/cdn-cgi/access/logout';
+    });
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Terminal viewport */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {/* Logout button — top-right corner */}
+        <button
+          onClick={logout}
+          aria-label="Log out"
+          style={{
+            background: 'rgba(0,0,0,0.45)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: '4px',
+            color: 'rgba(255,255,255,0.55)',
+            cursor: 'pointer',
+            fontSize: '0.7rem',
+            padding: '6px 12px',
+            touchAction: 'manipulation',
+            position: 'absolute',
+            right: '8px',
+            top: '8px',
+            zIndex: 10,
+          }}
+        >
+          logout
+        </button>
         <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
         {/* Reconnect overlay */}

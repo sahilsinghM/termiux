@@ -1,5 +1,7 @@
 require('dotenv').config();
+const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { log, err } = require('./src/server/logger.js');
@@ -10,6 +12,22 @@ const {
   incrementWsCount,
   decrementWsCount,
 } = require('./src/server/auth.js');
+
+function loadTls() {
+  const certFile = process.env.TLS_CERT_FILE;
+  const keyFile = process.env.TLS_KEY_FILE;
+  if (!certFile && !keyFile) return null;
+  if (!certFile || !keyFile) {
+    process.stderr.write('✖ TLS_CERT_FILE and TLS_KEY_FILE must both be set. Exiting.\n');
+    process.exit(1);
+  }
+  try {
+    return { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) };
+  } catch (e) {
+    process.stderr.write(`✖ Failed to load TLS files: ${e.message}. Exiting.\n`);
+    process.exit(1);
+  }
+}
 
 async function validateStartup() {
   // Cheapest checks first
@@ -36,7 +54,8 @@ async function main() {
   await validateStartup();
 
   const app = createApp();
-  const server = http.createServer(app);
+  const tls = loadTls();
+  const server = tls ? https.createServer(tls, app) : http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
@@ -80,8 +99,10 @@ async function main() {
   });
 
   const PORT = parseInt(process.env.PORT || '3000', 10);
-  server.listen(PORT, () => {
-    log(`✓ Termiux listening on http://localhost:${PORT}`);
+  const HOST = process.env.HOST || '127.0.0.1';
+  server.listen(PORT, HOST, () => {
+    const proto = tls ? 'https' : 'http';
+    log(`✓ Termiux listening on ${proto}://${HOST}:${PORT}${tls ? '' : ' (no TLS — set TLS_CERT_FILE + TLS_KEY_FILE for HTTPS)'}`);
   });
 }
 

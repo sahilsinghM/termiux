@@ -1,9 +1,15 @@
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const FileStore = require('session-file-store')(session);
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const { createRemoteJWKSet, jwtVerify } = require('jose');
 const { log } = require('./logger.js');
+
+const CF_JWKS = process.env.CF_TEAM_DOMAIN
+  ? createRemoteJWKSet(new URL(`${process.env.CF_TEAM_DOMAIN}/cdn-cgi/access/certs`))
+  : null;
 
 const MAX_WS_CONNECTIONS = 5;
 let wsConnectionCount = 0;
@@ -19,14 +25,14 @@ function createSessionParser() {
       retries: 1,
     }),
     name: 'termiux.sid',
-    secret: process.env.AUTH_TOKEN,
+    secret: process.env.SESSION_SECRET || process.env.AUTH_TOKEN,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
       sameSite: 'strict',
       secure: process.env.NODE_ENV !== 'development',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 24 * 60 * 60 * 1000,
     },
   });
 }
@@ -39,15 +45,36 @@ const loginLimiter = rateLimit({
   message: 'Too many login attempts. Try again in 15 minutes.',
 });
 
-function requireAuth(req, res, next) {
-  if (req.session && req.session.authenticated) return next();
-  res.redirect('/login');
+async function isCloudflareAuthenticated(req) {
+  if (!CF_JWKS || !process.env.CF_AUD) return false;
+  const token = req.headers['cf-access-jwt-assertion'];
+  if (!token) return false;
+  try {
+    await jwtVerify(token, CF_JWKS, {
+      audience: process.env.CF_AUD,
+      issuer: process.env.CF_TEAM_DOMAIN,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    if (await isCloudflareAuthenticated(req)) return next();
+    if (req.session && req.session.authenticated) return next();
+    res.redirect('/login');
+  } catch (e) {
+    next(e);
+  }
 }
 
 function createLoginRouter() {
   const router = express.Router();
 
-  router.get('/login', (req, res) => {
+  router.get('/login', async (req, res, next) => {
+    try { if (await isCloudflareAuthenticated(req)) return res.redirect('/'); } catch (e) { return next(e); }
     const error = req.query.error === '1';
     res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -80,7 +107,10 @@ function createLoginRouter() {
   router.post('/login', loginLimiter, express.urlencoded({ extended: false }), (req, res) => {
     const { password } = req.body;
     if (!password) return res.status(401).redirect('/login?error=1');
-    if (password !== process.env.AUTH_TOKEN) {
+    const expected = Buffer.from(process.env.AUTH_TOKEN);
+    const actual = Buffer.from(password.length === expected.length ? password : '\0'.repeat(expected.length));
+    const match = crypto.timingSafeEqual(actual, expected) && password.length === process.env.AUTH_TOKEN.length;
+    if (!match) {
       log(`Login attempt: fail from ${req.ip}`);
       return res.status(401).redirect('/login?error=1');
     }
@@ -89,18 +119,29 @@ function createLoginRouter() {
     req.session.save(() => res.redirect('/'));
   });
 
+  router.post('/logout', (req, res) => {
+    req.session.destroy(() => {
+      res.clearCookie('termiux.sid');
+      res.redirect('/login');
+    });
+  });
+
   return router;
 }
 
-function checkWsAuth(req, cb) {
-  if (wsConnectionCount >= MAX_WS_CONNECTIONS) {
-    log(`WS connection rejected: limit reached (${wsConnectionCount}/${MAX_WS_CONNECTIONS})`);
-    return cb(new Error('connection limit reached'));
+async function checkWsAuth(req, cb) {
+  try {
+    if (wsConnectionCount >= MAX_WS_CONNECTIONS) {
+      log(`WS connection rejected: limit reached (${wsConnectionCount}/${MAX_WS_CONNECTIONS})`);
+      return cb(new Error('connection limit reached'));
+    }
+    if (!await isCloudflareAuthenticated(req) && (!req.session || !req.session.authenticated)) {
+      return cb(new Error('unauthorized'));
+    }
+    cb(null);
+  } catch (e) {
+    cb(e);
   }
-  if (!req.session || !req.session.authenticated) {
-    return cb(new Error('unauthorized'));
-  }
-  cb(null);
 }
 
 module.exports = {

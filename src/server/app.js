@@ -8,6 +8,11 @@ function createApp() {
   const sessionParser = createSessionParser();
 
   app.use(sessionParser);
+  // ponytail: HSTS is harmless over HTTP and avoids a conditional — browsers ignore it without TLS
+  app.use((_req, res, next) => {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    next();
+  });
   app.use(createLoginRouter());
 
   app.get('/healthz', (req, res) => {

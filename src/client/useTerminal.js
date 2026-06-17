@@ -28,10 +28,26 @@ export function useTerminal({ containerRef, onStatus }) {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.open(containerRef.current);
+    const el = containerRef.current;
+    term.open(el);
     fit.fit();
     termRef.current = term;
     fitRef.current = fit;
+
+    // Touch scrolling — xterm renders to canvas so native scroll never fires
+    let lastTouchY = null;
+    function onTouchStart(e) { lastTouchY = e.touches[0].clientY; }
+    function onTouchMove(e) {
+      if (lastTouchY === null) return;
+      const dy = e.touches[0].clientY - lastTouchY;
+      lastTouchY = e.touches[0].clientY;
+      const lines = -Math.round(dy / 17); // 17px ≈ one line at fontSize 14
+      if (lines !== 0) term.scrollLines(lines);
+    }
+    function onTouchEnd() { lastTouchY = null; }
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
 
     function sendResize() {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -113,6 +129,9 @@ export function useTerminal({ containerRef, onStatus }) {
       if (wsRef.current) wsRef.current.close();
       if (window.visualViewport) window.visualViewport.removeEventListener('resize', handleViewportResize);
       window.removeEventListener('resize', handleViewportResize);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
       term.dispose();
     };
   }, []);
