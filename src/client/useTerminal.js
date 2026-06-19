@@ -10,7 +10,7 @@ function wsUrl() {
   return `${proto}//${location.host}/ws`;
 }
 
-export function useTerminal({ containerRef, onStatus }) {
+export function useTerminal({ containerRef, onStatus, onInput }) {
   const termRef = useRef(null);
   const wsRef = useRef(null);
   const fitRef = useRef(null);
@@ -18,6 +18,8 @@ export function useTerminal({ containerRef, onStatus }) {
   const reconnectTimer = useRef(null);
   const attemptRef = useRef(0);
   const aliveRef = useRef(true); // false when component unmounts
+  const onInputRef = useRef(onInput);
+  onInputRef.current = onInput; // always current, even inside stale closures
 
   useEffect(() => {
     const term = new Terminal({
@@ -31,6 +33,10 @@ export function useTerminal({ containerRef, onStatus }) {
     const el = containerRef.current;
     term.open(el);
     fit.fit();
+
+    // Let the mobile keyboard offer swipe/gesture typing.
+    // xterm sets autocorrect="off" by default — override it once after open.
+    if (term.textarea) term.textarea.setAttribute('autocorrect', 'on');
     termRef.current = term;
     fitRef.current = fit;
 
@@ -94,7 +100,17 @@ export function useTerminal({ containerRef, onStatus }) {
         fit.fit();
         sendResize();
         // Re-attach input now that we're connected
+        let lineBuffer = '';
         const disposable = term.onData((data) => {
+          // Track current line buffer for slash command palette
+          if (data === '\r' || data === '\x03' || data === '\x04' || data === '\x1b') {
+            lineBuffer = '';
+          } else if (data === '\x7f') {
+            lineBuffer = lineBuffer.slice(0, -1);
+          } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+            lineBuffer += data;
+          }
+          if (onInputRef.current) onInputRef.current(lineBuffer);
           if (ws.readyState === WebSocket.OPEN) ws.send(data);
         });
         ws._inputDisposable = disposable;

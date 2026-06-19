@@ -3,11 +3,34 @@ import { useTerminal } from './useTerminal.js';
 import { KeyRow } from './KeyRow.jsx';
 import '@xterm/xterm/css/xterm.css';
 
+const COMMANDS = [
+  'ls -la', 'ls', 'cd ..', 'cd ~', 'pwd',
+  'git status', 'git pull', 'git log --oneline', 'git diff', 'git add .', 'git commit -m ""',
+  'cat', 'nano', 'vim', 'less',
+  'ps aux', 'top', 'htop', 'kill',
+  'sudo', 'sudo -s',
+  'npm install', 'npm run dev', 'npm start', 'npm test',
+  'python3', 'pip install',
+  'clear', 'history', 'which', 'echo', 'env',
+];
+
 export function App() {
   const containerRef = useRef(null);
   const [status, setStatus] = useState({ connected: false, attempt: 0, ended: false });
+  const [inputBuffer, setInputBuffer] = useState('');
 
-  const { sendKey } = useTerminal({ containerRef, onStatus: setStatus });
+  const { sendKey } = useTerminal({ containerRef, onStatus: setStatus, onInput: setInputBuffer });
+
+  const showPalette = inputBuffer.startsWith('/') && inputBuffer.length >= 2;
+  const paletteQuery = showPalette ? inputBuffer.slice(1).toLowerCase() : '';
+  const filteredCmds = showPalette
+    ? COMMANDS.filter(c => c.toLowerCase().includes(paletteQuery))
+    : [];
+
+  function runCommand(cmd) {
+    sendKey('\x7f'.repeat(inputBuffer.length) + cmd + '\r');
+    setInputBuffer('');
+  }
 
   const disconnected = !status.connected;
   const overlayVisible = disconnected && !status.ended;
@@ -93,6 +116,40 @@ export function App() {
           </div>
         )}
       </div>
+
+      {/* Slash command palette — appears when typing /xx */}
+      {showPalette && filteredCmds.length > 0 && (
+        <div style={{
+          display: 'flex',
+          gap: '4px',
+          padding: '4px 6px',
+          background: '#0d1117',
+          borderTop: '1px solid #1f6feb',
+          overflowX: 'auto',
+          flexShrink: 0,
+        }}>
+          {filteredCmds.map(cmd => (
+            <button
+              key={cmd}
+              onPointerDown={(e) => { e.preventDefault(); runCommand(cmd); }}
+              style={{
+                background: '#161b22',
+                border: '1px solid #1f6feb',
+                borderRadius: '4px',
+                color: '#58a6ff',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                minHeight: '36px',
+                padding: '0 10px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {cmd}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Mobile key row */}
       <KeyRow onKey={sendKey} disabled={disconnected} />
