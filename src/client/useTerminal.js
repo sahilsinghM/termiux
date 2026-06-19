@@ -34,20 +34,33 @@ export function useTerminal({ containerRef, onStatus }) {
     termRef.current = term;
     fitRef.current = fit;
 
-    // Touch scrolling — xterm renders to canvas so native scroll never fires
+    // Touch scrolling — capture phase so xterm's own stopPropagation doesn't block us.
+    // Use term.scrollLines() (public API) instead of scrollTop; xterm v5 renders to canvas.
     let lastTouchY = null;
-    function onTouchStart(e) { lastTouchY = e.touches[0].clientY; }
+    let scrollAccum = 0;
+    function onTouchStart(e) {
+      if (!el.contains(e.target)) return;
+      lastTouchY = e.touches[0].clientY;
+      scrollAccum = 0;
+    }
     function onTouchMove(e) {
-      if (lastTouchY === null) return;
+      if (lastTouchY === null || !el.contains(e.target)) return;
+      e.preventDefault(); // block pull-to-refresh / browser overscroll
       const dy = e.touches[0].clientY - lastTouchY;
       lastTouchY = e.touches[0].clientY;
-      const lines = -Math.round(dy / 17); // 17px ≈ one line at fontSize 14
-      if (lines !== 0) term.scrollLines(lines);
+      scrollAccum += dy;
+      const lineH = term.options.fontSize || 14;
+      const lines = Math.trunc(scrollAccum / lineH);
+      if (lines !== 0) {
+        term.scrollLines(-lines);
+        scrollAccum -= lines * lineH;
+      }
     }
-    function onTouchEnd() { lastTouchY = null; }
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: true });
-    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    function onTouchEnd() { lastTouchY = null; scrollAccum = 0; }
+    window.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    // ponytail: non-passive so preventDefault() can block pull-to-refresh on downward swipe
+    window.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
 
     function sendResize() {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -129,9 +142,9 @@ export function useTerminal({ containerRef, onStatus }) {
       if (wsRef.current) wsRef.current.close();
       if (window.visualViewport) window.visualViewport.removeEventListener('resize', handleViewportResize);
       window.removeEventListener('resize', handleViewportResize);
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-      el.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchstart', onTouchStart, { capture: true });
+      window.removeEventListener('touchmove', onTouchMove, { capture: true });
+      window.removeEventListener('touchend', onTouchEnd, { capture: true });
       term.dispose();
     };
   }, []);

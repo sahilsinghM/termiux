@@ -44,7 +44,8 @@ export function App() {
         >
           logout
         </button>
-        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+        {/* cursor:pointer + onClick make iOS Safari dispatch touch events to non-interactive divs */}
+        <div ref={containerRef} style={{ width: '100%', height: '100%', cursor: 'pointer', touchAction: 'none' }} onClick={() => {}} />
 
         {/* Reconnect overlay */}
         {overlayVisible && (
