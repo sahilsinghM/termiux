@@ -4,12 +4,17 @@ const session = require('express-session');
 const FileStore = require('session-file-store')(session);
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-const { createRemoteJWKSet, jwtVerify } = require('jose');
+const { createAccessVerifier } = require('./accessIdentity.js');
 const { log } = require('./logger.js');
 
-const CF_JWKS = process.env.CF_TEAM_DOMAIN
-  ? createRemoteJWKSet(new URL(`${process.env.CF_TEAM_DOMAIN}/cdn-cgi/access/certs`))
-  : null;
+const accessVerifier = createAccessVerifier({
+  aud: process.env.CF_AUD,
+  issuer: process.env.CF_TEAM_DOMAIN,
+  allowedEmails: (process.env.CF_ALLOWED_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+});
 
 const MAX_WS_CONNECTIONS = 5;
 let wsConnectionCount = 0;
@@ -45,19 +50,11 @@ const loginLimiter = rateLimit({
   message: 'Too many login attempts. Try again in 15 minutes.',
 });
 
+// Returns the verified Access claims (truthy) or null. Callers treat any
+// truthy result as authenticated; the claims carry the identity used later to
+// scope a per-client shell session.
 async function isCloudflareAuthenticated(req) {
-  if (!CF_JWKS || !process.env.CF_AUD) return false;
-  const token = req.headers['cf-access-jwt-assertion'];
-  if (!token) return false;
-  try {
-    await jwtVerify(token, CF_JWKS, {
-      audience: process.env.CF_AUD,
-      issuer: process.env.CF_TEAM_DOMAIN,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return accessVerifier(req.headers?.['cf-access-jwt-assertion']);
 }
 
 async function requireAuth(req, res, next) {
