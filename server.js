@@ -7,6 +7,7 @@ const { WebSocketServer } = require('ws');
 const { log, err } = require('./src/server/logger.js');
 const { checkTmux, spawnPty, attachPtyToWs } = require('./src/server/pty.js');
 const { createApp } = require('./src/server/app.js');
+const { validateConfig } = require('./src/server/config.js');
 const {
   checkWsAuth,
   incrementWsCount,
@@ -30,9 +31,10 @@ function loadTls() {
 }
 
 async function validateStartup() {
-  // Cheapest checks first
-  if (!process.env.AUTH_TOKEN) {
-    process.stderr.write('✖ AUTH_TOKEN not set. Copy .env.example to .env and set a strong password. Exiting.\n');
+  // Cheapest checks first: fail closed on any misconfiguration.
+  const config = validateConfig(process.env);
+  if (!config.ok) {
+    process.stderr.write(`✖ ${config.message} Exiting.\n`);
     process.exit(1);
   }
 
