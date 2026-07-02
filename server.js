@@ -62,7 +62,7 @@ async function main() {
 
   server.on('upgrade', (req, socket, head) => {
     app.sessionParser(req, {}, () => {
-      checkWsAuth(req, (authErr) => {
+      checkWsAuth(req, (authErr, sessionName) => {
         if (authErr) {
           if (authErr.message === 'connection limit reached') {
             socket.write('HTTP/1.1 429 Too Many Connections\r\n\r\n');
@@ -79,7 +79,7 @@ async function main() {
 
           let ptyProcess;
           try {
-            ptyProcess = spawnPty();
+            ptyProcess = spawnPty(sessionName);
           } catch (e) {
             err(`PTY spawn failed: ${e.message}`);
             try {
@@ -90,7 +90,7 @@ async function main() {
             return;
           }
 
-          attachPtyToWs(ws, ptyProcess);
+          attachPtyToWs(ws, ptyProcess, sessionName);
 
           ws.on('close', () => {
             decrementWsCount();

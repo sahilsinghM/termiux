@@ -5,6 +5,7 @@ const FileStore = require('session-file-store')(session);
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { createAccessVerifier } = require('./accessIdentity.js');
+const { sessionNameFor } = require('./shellSession.js');
 const { log } = require('./logger.js');
 
 const accessVerifier = createAccessVerifier({
@@ -135,10 +136,14 @@ async function checkWsAuth(req, cb) {
       log(`WS connection rejected: limit reached (${wsConnectionCount}/${MAX_WS_CONNECTIONS})`);
       return cb(new Error('connection limit reached'));
     }
-    if (!await isCloudflareAuthenticated(req) && (!req.session || !req.session.authenticated)) {
+    const claims = await isCloudflareAuthenticated(req);
+    if (!claims && (!req.session || !req.session.authenticated)) {
       return cb(new Error('unauthorized'));
     }
-    cb(null);
+    // Access identities each get their own tmux session; password clients share
+    // one ('main'), since the password path has no per-identity concept.
+    const identity = claims && (claims.email || claims.common_name || claims.sub);
+    cb(null, sessionNameFor(identity));
   } catch (e) {
     cb(e);
   }
