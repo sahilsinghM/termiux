@@ -48,9 +48,11 @@ const loginLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  // Behind cloudflared every req.ip is loopback, which would make the limit a
-  // global lockout. Key on the real client IP that Cloudflare forwards.
-  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.ip,
+  // Key on req.ip, which `trust proxy: 'loopback'` resolves to the real client
+  // from the forwarded chain when the hop is loopback (cloudflared), and to the
+  // raw socket IP otherwise. Do NOT key on a raw header like CF-Connecting-IP:
+  // if the origin is ever reachable directly, an attacker could rotate it to
+  // mint a fresh bucket per request and bypass the limit entirely.
   message: 'Too many login attempts. Try again in 15 minutes.',
 });
 

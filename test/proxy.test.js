@@ -35,23 +35,36 @@ describe('reverse-proxy behavior', () => {
     expect(cookies.some((c) => c.startsWith('termiux.sid'))).toBe(true);
   });
 
-  it('keys the login limiter on the real client IP, so a fresh IP is not pre-limited', async () => {
-    // Exhaust the limit for one client IP.
+  it('keys the login limiter on the trusted forwarded client IP, not a spoofable header', async () => {
+    // The client IP must come from the trust-proxy-resolved forwarded chain,
+    // NOT a raw header an attacker could rotate to dodge the limit. Exhaust one
+    // client IP via X-Forwarded-For (honored only because trust proxy=loopback).
     for (let i = 0; i < 6; i++) {
       await request(app)
         .post('/login')
         .set('X-Forwarded-Proto', 'https')
-        .set('CF-Connecting-IP', '9.9.9.9')
+        .set('X-Forwarded-For', '9.9.9.9')
         .type('form')
         .send({ password: 'wrong' });
     }
-    // A different client IP has its own bucket and is not rate-limited.
+    // A different forwarded client has its own bucket.
     const fresh = await request(app)
       .post('/login')
       .set('X-Forwarded-Proto', 'https')
-      .set('CF-Connecting-IP', '8.8.8.8')
+      .set('X-Forwarded-For', '8.8.8.8')
       .type('form')
       .send({ password: 'wrong' });
     expect(fresh.status).not.toBe(429);
+
+    // A spoofed CF-Connecting-IP must NOT mint a fresh bucket for the
+    // already-limited forwarded client — the header is not the key.
+    const spoofed = await request(app)
+      .post('/login')
+      .set('X-Forwarded-Proto', 'https')
+      .set('X-Forwarded-For', '9.9.9.9')
+      .set('CF-Connecting-IP', 'whatever-attacker-wants')
+      .type('form')
+      .send({ password: 'wrong' });
+    expect(spoofed.status).toBe(429);
   });
 });
