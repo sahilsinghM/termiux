@@ -5,6 +5,11 @@ const { createSessionParser, requireAuth, createLoginRouter } = require('./auth.
 
 function createApp() {
   const app = express();
+  // cloudflared connects from localhost over plain HTTP and forwards
+  // X-Forwarded-Proto/CF-Connecting-IP. Trust only the loopback proxy (not a
+  // permissive `true`) so req.secure and req.ip reflect the real client without
+  // letting arbitrary upstreams spoof them.
+  app.set('trust proxy', 'loopback');
   const sessionParser = createSessionParser();
 
   app.use(sessionParser);

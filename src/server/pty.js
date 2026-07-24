@@ -1,6 +1,8 @@
 const pty = require('node-pty');
 const { exec, execFile } = require('child_process');
 const { log, debug, err } = require('./logger.js');
+const { shellEnv } = require('./shellSession.js');
+const { startHeartbeat } = require('./heartbeat.js');
 
 let tmuxAvailable = false;
 
@@ -17,18 +19,19 @@ function isTmuxAvailable() {
   return tmuxAvailable;
 }
 
-function spawnPty() {
-  return pty.spawn('tmux', ['new-session', '-A', '-s', 'main'], {
+function spawnPty(sessionName = 'main') {
+  return pty.spawn('tmux', ['new-session', '-A', '-s', sessionName], {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,
     cwd: process.env.HOME,
-    env: process.env,
+    env: shellEnv(process.env),
   });
 }
 
-function attachPtyToWs(ws, ptyProcess) {
+function attachPtyToWs(ws, ptyProcess, sessionName = 'main') {
   const startTime = Date.now();
+  const stopHeartbeat = startHeartbeat(ws);
 
   log(`PTY spawned: pid ${ptyProcess.pid}`);
 
@@ -63,7 +66,7 @@ function attachPtyToWs(ws, ptyProcess) {
         const rows = parseInt(msg.rows, 10);
         if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return;
         ptyProcess.resize(cols, rows);
-        execFile('tmux', ['resize-window', '-t', 'main', '-x', String(cols), '-y', String(rows)], (e) => {
+        execFile('tmux', ['resize-window', '-t', sessionName, '-x', String(cols), '-y', String(rows)], (e) => {
           if (e) err(`tmux resize failed: ${e.message}`);
         });
         return;
@@ -77,6 +80,7 @@ function attachPtyToWs(ws, ptyProcess) {
   });
 
   ws.on('close', () => {
+    stopHeartbeat();
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     log(`WS closed: pid ${ptyProcess.pid} after ${duration}s`);
     try {

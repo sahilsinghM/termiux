@@ -4,12 +4,18 @@ const session = require('express-session');
 const FileStore = require('session-file-store')(session);
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-const { createRemoteJWKSet, jwtVerify } = require('jose');
+const { createAccessVerifier } = require('./accessIdentity.js');
+const { sessionNameFor } = require('./shellSession.js');
 const { log } = require('./logger.js');
 
-const CF_JWKS = process.env.CF_TEAM_DOMAIN
-  ? createRemoteJWKSet(new URL(`${process.env.CF_TEAM_DOMAIN}/cdn-cgi/access/certs`))
-  : null;
+const accessVerifier = createAccessVerifier({
+  aud: process.env.CF_AUD,
+  issuer: process.env.CF_TEAM_DOMAIN,
+  allowedEmails: (process.env.CF_ALLOWED_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+});
 
 const MAX_WS_CONNECTIONS = 5;
 let wsConnectionCount = 0;
@@ -42,22 +48,19 @@ const loginLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  // Key on req.ip, which `trust proxy: 'loopback'` resolves to the real client
+  // from the forwarded chain when the hop is loopback (cloudflared), and to the
+  // raw socket IP otherwise. Do NOT key on a raw header like CF-Connecting-IP:
+  // if the origin is ever reachable directly, an attacker could rotate it to
+  // mint a fresh bucket per request and bypass the limit entirely.
   message: 'Too many login attempts. Try again in 15 minutes.',
 });
 
+// Returns the verified Access claims (truthy) or null. Callers treat any
+// truthy result as authenticated; the claims carry the identity used later to
+// scope a per-client shell session.
 async function isCloudflareAuthenticated(req) {
-  if (!CF_JWKS || !process.env.CF_AUD) return false;
-  const token = req.headers['cf-access-jwt-assertion'];
-  if (!token) return false;
-  try {
-    await jwtVerify(token, CF_JWKS, {
-      audience: process.env.CF_AUD,
-      issuer: process.env.CF_TEAM_DOMAIN,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return accessVerifier(req.headers?.['cf-access-jwt-assertion']);
 }
 
 async function requireAuth(req, res, next) {
@@ -135,10 +138,14 @@ async function checkWsAuth(req, cb) {
       log(`WS connection rejected: limit reached (${wsConnectionCount}/${MAX_WS_CONNECTIONS})`);
       return cb(new Error('connection limit reached'));
     }
-    if (!await isCloudflareAuthenticated(req) && (!req.session || !req.session.authenticated)) {
+    const claims = await isCloudflareAuthenticated(req);
+    if (!claims && (!req.session || !req.session.authenticated)) {
       return cb(new Error('unauthorized'));
     }
-    cb(null);
+    // Access identities each get their own tmux session; password clients share
+    // one ('main'), since the password path has no per-identity concept.
+    const identity = claims && (claims.email || claims.common_name || claims.sub);
+    cb(null, sessionNameFor(identity));
   } catch (e) {
     cb(e);
   }
